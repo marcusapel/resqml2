@@ -19,6 +19,7 @@ import resqml_converter.mappings.features  # noqa: F401
 import resqml_converter.mappings.interpretations  # noqa: F401
 import resqml_converter.mappings.representations  # noqa: F401
 import resqml_converter.mappings.properties  # noqa: F401
+import resqml_converter.mappings.additional  # noqa: F401
 
 
 # Object type ordering for conversion (features first, then interps, then reps, then props)
@@ -28,39 +29,67 @@ _CONVERSION_ORDER = [
     # CRS
     "LocalDepth3DCrs", "LocalTime3DCrs", "LocalDepth3dCrs", "LocalTime3dCrs",
     "VerticalCrs", "LocalEngineering2DCrs", "LocalEngineeringCompoundCrs",
+    "MdDatum",
     # EML common objects
-    "PropertyKind", "TimeSeries", "ActivityTemplate",
+    "PropertyKind", "TimeSeries", "ActivityTemplate", "Activity",
+    "DoubleTableLookup", "StringTableLookup",
     # Features
     "GeneticBoundaryFeature", "TectonicBoundaryFeature", "BoundaryFeature",
     "OrganizationFeature", "Model",
     "GeologicUnitFeature", "RockVolumeFeature",
+    "GeobodyFeature", "FluidBoundaryFeature", "FrontierFeature",
+    "RockFluidUnitFeature", "StratigraphicUnitFeature",
     "WellboreFeature", "SeismicLatticeFeature",
+    "SeismicLatticeSetFeature", "SeismicLineFeature", "SeismicLineSetFeature",
+    "ShotPointLineFeature", "CmpLineFeature",
+    "StreamlinesFeature", "CulturalFeature",
     # Interpretations
     "HorizonInterpretation", "FaultInterpretation",
     "GeobodyInterpretation", "GeobodyBoundaryInterpretation",
+    "BoundaryFeatureInterpretation", "GenericFeatureInterpretation",
     "WellboreInterpretation",
+    "GeologicUnitInterpretation",
     "StratigraphicUnitInterpretation",
+    "StratigraphicOccurrenceInterpretation", "GeologicUnitOccurrenceInterpretation",
     "RockFluidUnitInterpretation", "RockFluidOrganizationInterpretation",
     "FluidBoundaryInterpretation",
+    "ReservoirCompartmentInterpretation", "VoidageGroupInterpretation",
     "StructuralOrganizationInterpretation",
     "StratigraphicColumnRankInterpretation",
     "EarthModelInterpretation",
     # Representations
     "TriangulatedSetRepresentation",
-    "Grid2DRepresentation", "Grid2dRepresentation",
+    "Grid2DRepresentation", "Grid2dRepresentation", "Grid2DSetRepresentation",
     "IjkGridRepresentation", "UnstructuredGridRepresentation",
-    "WellboreTrajectoryRepresentation",
-    "WellboreFrameRepresentation", "BlockedWellboreRepresentation",
+    "TruncatedIjkGridRepresentation",
+    "UnstructuredColumnLayerGridRepresentation",
+    "TruncatedUnstructuredColumnLayerGridRepresentation",
+    "GpGridRepresentation",
+    "WellboreTrajectoryRepresentation", "DeviationSurveyRepresentation",
+    "WellboreFrameRepresentation", "WellboreMarkerFrameRepresentation",
+    "BlockedWellboreRepresentation",
     "PointSetRepresentation",
     "PolylineRepresentation", "PolylineSetRepresentation",
     "GridConnectionSetRepresentation",
-    "SealedSurfaceFrameworkRepresentation",
+    "SealedSurfaceFrameworkRepresentation", "NonSealedSurfaceFrameworkRepresentation",
+    "SealedVolumeFrameworkRepresentation",
+    "PlaneSetRepresentation",
+    "RepresentationSetRepresentation", "RepresentationIdentitySet",
+    "RedefinedGeometryRepresentation",
+    "StreamlinesRepresentation",
     "SubRepresentation",
+    "Seismic2DPostStackRepresentation", "Seismic3DPostStackRepresentation",
+    "SeismicWellboreFrameRepresentation",
+    "Graph2DRepresentation", "WellboreIntervalSet",
+    "LocalGridSet",
     # Properties
     "ContinuousProperty", "DiscreteProperty", "CategoricalProperty",
+    "BooleanProperty", "CommentProperty", "PointsProperty",
+    "ContinuousPropertySeries", "DiscretePropertySeries",
+    "CategoricalPropertySeries", "CommentPropertySeries",
+    "PropertySet",
     # Misc
-    "StratigraphicColumn",
-    "Activity",
+    "StratigraphicColumn", "GlobalChronostratigraphicColumn",
 ]
 
 
