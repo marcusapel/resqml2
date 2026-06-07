@@ -164,7 +164,10 @@ def convert_earth_model_interp_to_22(obj: r201.EarthModelInterpretation, ctx: Co
 def convert_strat_col_rank_to_22(obj: Any, ctx: ConversionContext) -> Any:
     strat_units = []
     for su in getattr(obj, 'stratigraphic_units', []) or []:
-        strat_units.append(convert_dor_201_to_23(su, ctx))
+        # In 2.0.1, stratigraphic_units is List[StratigraphicUnitInterpretationIndex]
+        # which has .index and .unit (DOR). In 2.2, it's just List[DOR].
+        unit_dor = getattr(su, 'unit', su)
+        strat_units.append(convert_dor_201_to_23(unit_dor, ctx))
 
     return r22.StratigraphicColumnRankInterpretation(
         citation=convert_citation_201_to_23(obj.citation),

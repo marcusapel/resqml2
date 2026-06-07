@@ -304,7 +304,7 @@ def _convert_property_kind_201_to_22_dor(obj: Any, ctx: ConversionContext) -> Op
         return eml23.DataObjectReference(
             uuid="00000000-0000-0000-0000-000000000000",
             title=kind_name,
-            qualified_type="eml23.PropertyKind",
+            qualified_type="eml22.PropertyKind",
         )
 
     return None

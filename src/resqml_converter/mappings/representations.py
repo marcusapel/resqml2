@@ -212,7 +212,6 @@ def convert_wellbore_traj_to_22(obj: r201.WellboreTrajectoryRepresentation, ctx:
         md_interval=r22.MdInterval(
             md_min=obj.start_md or 0.0,
             md_max=obj.finish_md or 0.0,
-            datum=convert_dor_201_to_23(obj.md_datum, ctx),
             uom=md_uom,
         ),
         geometry=geometry,

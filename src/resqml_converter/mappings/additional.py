@@ -353,7 +353,6 @@ def convert_deviation_survey_to_22(obj: Any, ctx: ConversionContext) -> Any:
         md_interval=r22.MdInterval(
             md_min=getattr(obj, 'first_station_md', 0.0) or 0.0,
             md_max=getattr(obj, 'last_station_md', 0.0) or 0.0,
-            datum=convert_dor_201_to_23(getattr(obj, 'md_datum', None), ctx),
             uom=md_uom,
         ),
     )

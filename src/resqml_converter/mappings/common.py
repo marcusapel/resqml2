@@ -280,10 +280,10 @@ _TYPE_NAME_MAP_201_TO_22 = {
     "Grid2DRepresentation": "Grid2dRepresentation",
     "Grid2dRepresentation": "Grid2dRepresentation",
     "Grid2DSetRepresentation": "RepresentationSetRepresentation",
-    "LocalDepth3DCrs": "LocalEngineeringCompoundCrs",
-    "LocalDepth3dCrs": "LocalEngineeringCompoundCrs",
-    "LocalTime3DCrs": "LocalEngineeringCompoundCrs",
-    "LocalTime3dCrs": "LocalEngineeringCompoundCrs",
+    "LocalDepth3DCrs": "LocalDepth3dCrs",
+    "LocalDepth3dCrs": "LocalDepth3dCrs",
+    "LocalTime3DCrs": "LocalTime3dCrs",
+    "LocalTime3dCrs": "LocalTime3dCrs",
     "EpcExternalPartReference": "EpcExternalPartReference",
     "obj_EpcExternalPartReference": "EpcExternalPartReference",
     "WellboreMarkerFrameRepresentation": "WellboreFrameRepresentation",
@@ -312,6 +312,8 @@ _TYPE_NAME_MAP_22_TO_201 = {
     "Grid2dRepresentation": "Grid2DRepresentation",
     "LocalEngineeringCompoundCrs": "LocalDepth3DCrs",
     "LocalEngineering2DCrs": "LocalDepth3DCrs",
+    "LocalDepth3dCrs": "LocalDepth3DCrs",
+    "LocalTime3dCrs": "LocalTime3DCrs",
     "EpcExternalPartReference": "EpcExternalPartReference",
     "DiscreteProperty": "DiscreteProperty",
     "BooleanProperty": "DiscreteProperty",
@@ -327,11 +329,14 @@ _TYPE_NAME_MAP_22_TO_201 = {
 
 
 def _content_type_to_qualified_type_22(content_type: Optional[str]) -> Optional[str]:
-    """Convert 2.0.1 content_type to 2.2 qualified_type string."""
+    """Convert 2.0.1 content_type to 2.2 qualified_type string.
+
+    RDDMS convention:
+    - RESQML types → resqml22.X (e.g. resqml22.LocalDepth3dCrs)
+    - EML types → eml22.X (e.g. eml22.PropertyKind)  NOT eml23!
+    """
     if content_type is None:
         return None
-    # Parse content_type: "application/x-resqml+xml;version=2.0;type=obj_TypeName"
-    # or "application/x-eml+xml;version=2.0;type=obj_TypeName"
     import re
     m = re.search(r'type=obj_(\w+)', content_type)
     type_name = m.group(1) if m else None
@@ -342,11 +347,11 @@ def _content_type_to_qualified_type_22(content_type: Optional[str]) -> Optional[
     # Map type name
     mapped_name = _TYPE_NAME_MAP_201_TO_22.get(type_name, type_name)
 
-    # Determine domain
+    # Determine domain — RDDMS uses eml22 (not eml23) for EML types
     if "resqml" in content_type:
         return f"resqml22.{mapped_name}"
     elif "eml" in content_type:
-        return f"eml23.{mapped_name}"
+        return f"eml22.{mapped_name}"
     else:
         return f"resqml22.{mapped_name}"
 
