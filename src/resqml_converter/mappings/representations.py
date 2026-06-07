@@ -668,6 +668,9 @@ def _convert_jagged_array_22_to_201(ja: Any, hdf_ref: Any) -> Optional[Any]:
     return r201.JaggedArray(elements=elements, cumulative_length=cum_length)
 
 
-def _parse_length_uom(uom_str: str) -> r201.LengthUom:
+def _parse_length_uom(uom_str) -> r201.LengthUom:
+    if hasattr(uom_str, 'value'):
+        uom_str = uom_str.value
+    uom_str = str(uom_str).lower()
     uom_map = {"m": r201.LengthUom.M, "ft": r201.LengthUom.FT, "km": r201.LengthUom.KM}
-    return uom_map.get(uom_str.lower(), r201.LengthUom.M)
+    return uom_map.get(uom_str, r201.LengthUom.M)

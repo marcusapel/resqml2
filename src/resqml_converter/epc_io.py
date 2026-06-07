@@ -26,7 +26,7 @@ def write_epc(epc: Epc, output_path: str) -> None:
 
 def get_all_objects(epc: Epc) -> List[Any]:
     """Extract all parsed energyml objects from an Epc."""
-    return list(epc.energyml_objects.values()) if hasattr(epc, 'energyml_objects') else epc.get_all_objects()
+    return list(epc.energyml_objects)
 
 
 def detect_version(epc: Epc) -> str:

@@ -282,13 +282,16 @@ def convert_struct_org_interp_to_201(obj: r22.StructuralOrganizationInterpretati
 
 @registry.register_22_to_201(r"EarthModelInterpretation")
 def convert_earth_model_interp_to_201(obj: r22.EarthModelInterpretation, ctx: ConversionContext) -> Any:
+    # structure in 2.2 is a list of DORs; 2.0.1 expects a single DOR
+    structure_list = getattr(obj, 'structure', None) or []
+    structure_dor = convert_dor_23_to_201(structure_list[0], ctx) if structure_list else None
     return r201.EarthModelInterpretation(
         citation=convert_citation_23_to_201(obj.citation),
         uuid=get_obj_uuid(obj),
         schema_version=SCHEMA_VERSION_201,
         domain=_convert_domain_22_to_201(obj.domain),
         interpreted_feature=convert_dor_23_to_201(obj.interpreted_feature, ctx),
-        structure=convert_dor_23_to_201(getattr(obj, 'structure', None), ctx),
+        structure=structure_dor,
         stratigraphic_column=convert_dor_23_to_201(getattr(obj, 'stratigraphic_column', None), ctx),
     )
 

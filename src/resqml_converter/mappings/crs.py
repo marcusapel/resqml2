@@ -350,10 +350,13 @@ def _dirs_to_axis_order(dir1: Any, dir2: Any) -> r201.AxisOrder2D:
     return r201.AxisOrder2D.EASTING_NORTHING
 
 
-def _parse_length_uom_201(uom_str: str) -> r201.LengthUom:
-    """Parse a UOM string into the 2.0.1 LengthUom enum."""
+def _parse_length_uom_201(uom_str: Any) -> r201.LengthUom:
+    """Parse a UOM string or enum into the 2.0.1 LengthUom enum."""
+    if hasattr(uom_str, 'value'):
+        uom_str = uom_str.value
+    uom_str = str(uom_str).lower()
     uom_map = {"m": r201.LengthUom.M, "ft": r201.LengthUom.FT, "km": r201.LengthUom.KM}
-    return uom_map.get(uom_str.lower(), r201.LengthUom.M)
+    return uom_map.get(uom_str, r201.LengthUom.M)
 
 
 def get_qualified_type_from_class_safe(cls) -> str:

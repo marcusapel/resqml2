@@ -379,15 +379,17 @@ def _uom_to_quantity_class(uom: str) -> str:
     return uom_map.get(uom, "dimensionless")
 
 
-def _quantity_class_to_uom(qc: str) -> r201.ResqmlUom:
+def _quantity_class_to_uom(qc) -> r201.ResqmlUom:
     """Map a quantity class back to a representative UOM."""
+    # qc may be an enum or string
+    qc_str = qc.value if hasattr(qc, 'value') else str(qc)
     qc_map = {
         "dimensionless": r201.ResqmlUom.EUC,
         "length": r201.ResqmlUom.M,
         "volume": r201.ResqmlUom.M3,
-        "pressure": r201.ResqmlUom.PA,
+        "pressure": r201.ResqmlUom.PA_1,
     }
-    return qc_map.get(qc, r201.ResqmlUom.EUC)
+    return qc_map.get(qc_str, r201.ResqmlUom.EUC)
 
 
 def _parse_resqml_uom(uom_str: str) -> r201.ResqmlUom:
