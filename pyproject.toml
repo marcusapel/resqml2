@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "resqml-converter"
+version = "0.1.0"
+description = "Two-way RESQML 2.0.1 <-> RESQML 2.2 file and dataspace converter with complete object support"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.10"
+authors = [
+    {name = "RDDMS Team"},
+]
+
+dependencies = [
+    "energyml-resqml2-0-1>=1.12.0",
+    "energyml-resqml2-2>=1.12.0",
+    "energyml-common2-0>=1.12.0",
+    "energyml-common2-2>=1.12.0",
+    "energyml-common2-3>=1.12.0",
+    "energyml-opc>=1.12.0",
+    "energyml-utils>=1.9.0",
+    "h5py>=3.9",
+    "numpy>=1.24",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+]
+
+[project.scripts]
+resqml-convert = "resqml_converter.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
