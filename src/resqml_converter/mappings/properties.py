@@ -388,12 +388,13 @@ def _quantity_class_to_uom(qc) -> r201.ResqmlUom:
         "length": r201.ResqmlUom.M,
         "volume": r201.ResqmlUom.M3,
         "pressure": r201.ResqmlUom.PA_1,
+        "permeability": r201.ResqmlUom.M_D,
     }
     return qc_map.get(qc_str, r201.ResqmlUom.EUC)
 
 
 def _parse_resqml_uom(uom_str: str) -> r201.ResqmlUom:
-    """Parse UOM string to RESQML 2.0.1 enum."""
+    """Parse a UOM string into a ResqmlUom enum value."""
     try:
         return r201.ResqmlUom(uom_str)
     except (ValueError, KeyError):
