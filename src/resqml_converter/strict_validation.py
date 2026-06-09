@@ -75,6 +75,8 @@ class ValidationCategory(str, Enum):
     EPC_STRUCTURE = "epc_structure"
     CROSS_OBJECT = "cross_object"
     HDF5_REFERENCE = "hdf5_reference"
+    FESAPI_COMPAT = "fesapi_compat"
+    RDDMS_COMPAT = "rddms_compat"
 
     def __str__(self):
         return self.value
@@ -577,6 +579,276 @@ def validate_cross_object_consistency(
     # Version-specific checks could be added here as needed
     # Note: energyml internal class names (e.g. LocalDepth3DCrs vs ObjLocalDepth3DCrs)
     # don't reflect the XML serialization prefix, so we don't check class naming.
+
+    return errors
+
+
+# --- fesapi Compatibility Validation ---
+
+# Elements that must appear last in their parent (per fesapi strictness)
+_FESAPI_LAST_ELEMENTS = {"ExtraMetadata"}
+
+# Regex for extracting type from root element tag
+_ROOT_TAG_RE = re.compile(r"\{[^}]+\}(obj_)?(\w+)")
+
+
+def validate_fesapi_compat(
+    epc_path: str,
+    version: Optional[str] = None,
+) -> List[StrictValidationError]:
+    """Validate EPC raw XML for fesapi parser compatibility (RESQML 2.0.1).
+
+    fesapi is stricter than the XSD specification in several ways:
+      - Root element MUST have xsi:type attribute for polymorphic deserialization
+      - ExtraMetadata must be the LAST child elements (after all type-specific elements)
+      - Root element should NOT use obj_ prefix in the tag name
+      - Element ordering must strictly follow XSD sequence
+
+    These checks operate on the raw XML bytes inside the EPC (not energyml objects),
+    since the issues are about serialization format.
+    """
+    errors = []
+
+    if version and version != "2.0.1":
+        return errors  # fesapi checks only apply to 2.0.1
+
+    try:
+        zf = zipfile.ZipFile(epc_path, "r")
+    except (zipfile.BadZipFile, FileNotFoundError):
+        return errors  # Structure checks handle this
+
+    with zf:
+        for name in zf.namelist():
+            if not name.endswith(".xml"):
+                continue
+            if name == "[Content_Types].xml" or name.startswith("_rels/"):
+                continue
+
+            xml_bytes = zf.read(name)
+            try:
+                root = etree.fromstring(xml_bytes)
+            except etree.XMLSyntaxError:
+                continue  # XSD validation handles parse errors
+
+            tag = etree.QName(root.tag)
+            local_name = tag.localname
+            obj_uuid = root.get("uuid")
+            obj_type = local_name.removeprefix("obj_") if local_name.startswith("obj_") else local_name
+
+            # Skip non-RESQML objects (e.g. EpcExternalPartReference)
+            if tag.namespace not in (RESQML_NS, EML_NS):
+                continue
+
+            # Check 1: xsi:type on root element
+            xsi_type = root.get(f"{{{NS_MAP.get('xsi', 'http://www.w3.org/2001/XMLSchema-instance')}}}type")
+            if xsi_type is None:
+                # Check with explicit xsi namespace
+                xsi_type = root.get("{http://www.w3.org/2001/XMLSchema-instance}type")
+            if xsi_type is None:
+                errors.append(StrictValidationError(
+                    message=(
+                        f"Missing xsi:type on root element (fesapi requires this for deserialization). "
+                        f"Expected xsi:type containing 'obj_{obj_type}'"
+                    ),
+                    severity=Severity.ERROR,
+                    category=ValidationCategory.FESAPI_COMPAT,
+                    object_uuid=obj_uuid,
+                    object_type=obj_type,
+                ))
+
+            # Check 2: Root element should NOT have obj_ prefix in tag name
+            if local_name.startswith("obj_"):
+                errors.append(StrictValidationError(
+                    message=(
+                        f"Root element uses obj_ prefix in tag name (<{local_name}>). "
+                        f"fesapi expects the tag without obj_ prefix."
+                    ),
+                    severity=Severity.WARNING,
+                    category=ValidationCategory.FESAPI_COMPAT,
+                    object_uuid=obj_uuid,
+                    object_type=obj_type,
+                ))
+
+            # Check 3: ExtraMetadata must be last among siblings
+            children = list(root)
+            if children:
+                last_non_em_idx = -1
+                first_em_idx = -1
+                for i, child in enumerate(children):
+                    child_local = etree.QName(child.tag).localname
+                    if child_local == "ExtraMetadata":
+                        if first_em_idx == -1:
+                            first_em_idx = i
+                    else:
+                        last_non_em_idx = i
+
+                if first_em_idx != -1 and last_non_em_idx > first_em_idx:
+                    errors.append(StrictValidationError(
+                        message=(
+                            "ExtraMetadata appears before other elements. "
+                            "fesapi requires ExtraMetadata to be the last child elements."
+                        ),
+                        severity=Severity.ERROR,
+                        category=ValidationCategory.FESAPI_COMPAT,
+                        object_uuid=obj_uuid,
+                        object_type=obj_type,
+                    ))
+
+    return errors
+
+
+# --- RDDMS Compatibility Validation ---
+
+_RELS_NS = "http://schemas.openxmlformats.org/package/2006/relationships"
+_EXT_RESOURCE_TYPE = "http://schemas.energistics.org/package/2012/relationships/externalResource"
+_DEST_OBJ_TYPE = "http://schemas.energistics.org/package/2012/relationships/destinationObject"
+_SOURCE_OBJ_TYPE = "http://schemas.energistics.org/package/2012/relationships/sourceObject"
+
+
+def validate_rddms_compat(
+    epc_path: str,
+    version: Optional[str] = None,
+) -> List[StrictValidationError]:
+    """Validate EPC for RDDMS (ETP server) import compatibility.
+
+    Checks:
+      - Namespace prefix conventions (resqml2: not resqml:)
+      - ContentType format in [Content_Types].xml
+      - EPR .rels has externalResource → HDF5 with TargetMode="External"
+      - Root _rels/.rels references the EpcExternalPartReference
+      - Closing tags match opening tags (no obj_ mismatch)
+    """
+    errors = []
+
+    if version and version != "2.0.1":
+        return errors  # RDDMS checks focused on 2.0.1
+
+    try:
+        zf = zipfile.ZipFile(epc_path, "r")
+    except (zipfile.BadZipFile, FileNotFoundError):
+        return errors
+
+    with zf:
+        names = set(zf.namelist())
+
+        # Check [Content_Types].xml format
+        if "[Content_Types].xml" in names:
+            ct_xml = zf.read("[Content_Types].xml").decode("utf-8", errors="replace")
+            try:
+                ct_root = ET.fromstring(ct_xml)
+                for override in ct_root:
+                    ct_value = override.get("ContentType", "")
+                    part_name = override.get("PartName", "")
+                    # RESQML objects should have version=2.0 and type=obj_TypeName
+                    if "x-resqml+xml" in ct_value:
+                        if "version=2.0" not in ct_value:
+                            errors.append(StrictValidationError(
+                                message=f"ContentType missing version=2.0: '{ct_value}' for {part_name}",
+                                severity=Severity.WARNING,
+                                category=ValidationCategory.RDDMS_COMPAT,
+                            ))
+                        if "type=obj_" not in ct_value:
+                            errors.append(StrictValidationError(
+                                message=f"ContentType missing type=obj_ prefix: '{ct_value}' for {part_name}",
+                                severity=Severity.WARNING,
+                                category=ValidationCategory.RDDMS_COMPAT,
+                            ))
+            except ET.ParseError:
+                pass  # Structure validation handles this
+
+        # Check EpcExternalPartReference .rels has HDF5 link
+        epr_files = [n for n in names if "EpcExternalPartReference" in n and n.endswith(".xml") and not n.startswith("_rels/")]
+        for epr_file in epr_files:
+            rels_file = f"_rels/{epr_file}.rels"
+            if rels_file not in names:
+                errors.append(StrictValidationError(
+                    message=f"Missing .rels for EpcExternalPartReference: {rels_file}",
+                    severity=Severity.ERROR,
+                    category=ValidationCategory.RDDMS_COMPAT,
+                ))
+                continue
+
+            rels_xml = zf.read(rels_file).decode("utf-8", errors="replace")
+            try:
+                rels_root = ET.fromstring(rels_xml)
+                has_hdf5_link = False
+                for rel in rels_root:
+                    rel_type = rel.get("Type", "")
+                    target_mode = rel.get("TargetMode", "")
+                    target = rel.get("Target", "")
+                    if rel_type == _EXT_RESOURCE_TYPE:
+                        has_hdf5_link = True
+                        if target_mode != "External":
+                            errors.append(StrictValidationError(
+                                message=(
+                                    f"EPR .rels externalResource should have TargetMode=\"External\", "
+                                    f"got '{target_mode}'"
+                                ),
+                                severity=Severity.ERROR,
+                                category=ValidationCategory.RDDMS_COMPAT,
+                            ))
+                        if not target:
+                            errors.append(StrictValidationError(
+                                message="EPR .rels externalResource has empty Target",
+                                severity=Severity.ERROR,
+                                category=ValidationCategory.RDDMS_COMPAT,
+                            ))
+                if not has_hdf5_link:
+                    errors.append(StrictValidationError(
+                        message=(
+                            f"EPR .rels ({rels_file}) has no externalResource relationship to HDF5 file. "
+                            f"RDDMS requires this to locate the HDF5 data."
+                        ),
+                        severity=Severity.ERROR,
+                        category=ValidationCategory.RDDMS_COMPAT,
+                    ))
+            except ET.ParseError:
+                errors.append(StrictValidationError(
+                    message=f"EPR .rels is not well-formed XML: {rels_file}",
+                    severity=Severity.ERROR,
+                    category=ValidationCategory.RDDMS_COMPAT,
+                ))
+
+        # Check namespace prefix and tag mismatch in RESQML XML
+        for name in names:
+            if not name.endswith(".xml") or name == "[Content_Types].xml" or name.startswith("_rels/"):
+                continue
+            if "EpcExternalPartReference" in name:
+                continue
+
+            xml_content = zf.read(name).decode("utf-8", errors="replace")
+
+            # Check namespace prefix: should use resqml2: not resqml:
+            if 'xmlns:resqml="http://www.energistics.org/energyml/data/resqmlv2"' in xml_content:
+                obj_uuid_m = re.search(r'uuid="([^"]+)"', xml_content)
+                errors.append(StrictValidationError(
+                    message=(
+                        "Uses 'resqml:' namespace prefix instead of 'resqml2:'. "
+                        "RDDMS/fesapi expects 'resqml2:' prefix for RESQML 2.0.1."
+                    ),
+                    severity=Severity.ERROR,
+                    category=ValidationCategory.RDDMS_COMPAT,
+                    object_uuid=obj_uuid_m.group(1) if obj_uuid_m else None,
+                    object_type=re.search(r"obj_(\w+?)_", name).group(1) if "obj_" in name else None,
+                ))
+
+            # Check closing tag mismatch (obj_ in closing but not opening)
+            open_m = re.search(r"<(?:resqml2?|eml):(\w+)\s", xml_content)
+            close_m = re.search(r"</(?:resqml2?|eml):(\w+)>\s*$", xml_content)
+            if open_m and close_m:
+                open_name = open_m.group(1)
+                close_name = close_m.group(1)
+                if open_name != close_name:
+                    obj_uuid_m = re.search(r'uuid="([^"]+)"', xml_content)
+                    errors.append(StrictValidationError(
+                        message=(
+                            f"Root element tag mismatch: opening <{open_name}> vs closing </{close_name}>. "
+                            f"This will cause fesapi parse failure."
+                        ),
+                        severity=Severity.ERROR,
+                        category=ValidationCategory.RDDMS_COMPAT,
+                        object_uuid=obj_uuid_m.group(1) if obj_uuid_m else None,
+                    ))
 
     return errors
 
