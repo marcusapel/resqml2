@@ -639,7 +639,8 @@ def validate_fesapi_compat(
             if tag.namespace not in (RESQML_NS, EML_NS):
                 continue
 
-            # Check 1: xsi:type on root element
+            # Check 1: xsi:type on root element (needed for RDDMS ETP import,
+            #          but NOT required for local fesapi file reading)
             xsi_type = root.get(f"{{{NS_MAP.get('xsi', 'http://www.w3.org/2001/XMLSchema-instance')}}}type")
             if xsi_type is None:
                 # Check with explicit xsi namespace
@@ -647,10 +648,11 @@ def validate_fesapi_compat(
             if xsi_type is None:
                 errors.append(StrictValidationError(
                     message=(
-                        f"Missing xsi:type on root element (fesapi requires this for deserialization). "
-                        f"Expected xsi:type containing 'obj_{obj_type}'"
+                        f"Missing xsi:type on root element. "
+                        f"fesapi can read this locally, but RDDMS ETP import requires xsi:type "
+                        f"for server-side deserialization. Expected xsi:type containing 'obj_{obj_type}'"
                     ),
-                    severity=Severity.ERROR,
+                    severity=Severity.WARNING,
                     category=ValidationCategory.FESAPI_COMPAT,
                     object_uuid=obj_uuid,
                     object_type=obj_type,
@@ -818,15 +820,15 @@ def validate_rddms_compat(
 
             xml_content = zf.read(name).decode("utf-8", errors="replace")
 
-            # Check namespace prefix: should use resqml2: not resqml:
+            # Check namespace prefix: resqml2: is preferred for RDDMS but resqml: also works
             if 'xmlns:resqml="http://www.energistics.org/energyml/data/resqmlv2"' in xml_content:
                 obj_uuid_m = re.search(r'uuid="([^"]+)"', xml_content)
                 errors.append(StrictValidationError(
                     message=(
                         "Uses 'resqml:' namespace prefix instead of 'resqml2:'. "
-                        "RDDMS/fesapi expects 'resqml2:' prefix for RESQML 2.0.1."
+                        "Some RDDMS configurations expect 'resqml2:' prefix for RESQML 2.0.1."
                     ),
-                    severity=Severity.ERROR,
+                    severity=Severity.WARNING,
                     category=ValidationCategory.RDDMS_COMPAT,
                     object_uuid=obj_uuid_m.group(1) if obj_uuid_m else None,
                     object_type=re.search(r"obj_(\w+?)_", name).group(1) if "obj_" in name else None,
@@ -849,6 +851,26 @@ def validate_rddms_compat(
                         category=ValidationCategory.RDDMS_COMPAT,
                         object_uuid=obj_uuid_m.group(1) if obj_uuid_m else None,
                     ))
+
+            # Check xsi:type on root element (required for RDDMS ETP server-side parsing)
+            # Find the root opening tag (skip XML prolog, then everything up to first >)
+            root_start = xml_content.find('<', xml_content.find('?>') + 2) if '?>' in xml_content else 0
+            root_tag_end = xml_content.find('>', root_start) if root_start >= 0 else -1
+            root_tag = xml_content[root_start:root_tag_end] if root_tag_end != -1 else xml_content
+            if 'xsi:type=' not in root_tag:
+                obj_uuid_m = re.search(r'uuid="([^"]+)"', xml_content)
+                obj_type_m = re.search(r"obj_(\w+?)_", name)
+                errors.append(StrictValidationError(
+                    message=(
+                        "Missing xsi:type on root element. "
+                        "RDDMS ETP import requires xsi:type for server-side object deserialization "
+                        "(e.g. xsi:type=\"resqml2:obj_TypeName\")."
+                    ),
+                    severity=Severity.ERROR,
+                    category=ValidationCategory.RDDMS_COMPAT,
+                    object_uuid=obj_uuid_m.group(1) if obj_uuid_m else None,
+                    object_type=obj_type_m.group(1) if obj_type_m else None,
+                ))
 
     return errors
 
@@ -911,6 +933,8 @@ def validate_epc_strict(
     skip_epc_structure: bool = False,
     skip_hdf5: bool = False,
     skip_cross_object: bool = False,
+    skip_fesapi: bool = False,
+    skip_rddms: bool = False,
 ) -> StrictValidationReport:
     """Run full strict validation on an EPC file.
 
@@ -921,6 +945,8 @@ def validate_epc_strict(
       4. DOR integrity (referential completeness)
       5. HDF5 reference validation
       6. Cross-object consistency
+      7. fesapi compatibility (xsi:type, element ordering, ExtraMetadata position)
+      8. RDDMS compatibility (namespace prefixes, .rels integrity, ContentType format)
 
     Args:
         epc_path: Path to the EPC file.
@@ -932,6 +958,8 @@ def validate_epc_strict(
         skip_epc_structure: Skip EPC structure validation.
         skip_hdf5: Skip HDF5 reference validation.
         skip_cross_object: Skip cross-object consistency.
+        skip_fesapi: Skip fesapi compatibility checks.
+        skip_rddms: Skip RDDMS compatibility checks.
 
     Returns:
         StrictValidationReport with all findings.
@@ -1008,6 +1036,14 @@ def validate_epc_strict(
     # 6. Cross-object consistency
     if not skip_cross_object and version:
         report.errors.extend(validate_cross_object_consistency(objects, version))
+
+    # 7. fesapi compatibility (raw XML checks)
+    if not skip_fesapi:
+        report.errors.extend(validate_fesapi_compat(epc_path, version))
+
+    # 8. RDDMS compatibility (rels, namespace, ContentType)
+    if not skip_rddms:
+        report.errors.extend(validate_rddms_compat(epc_path, version))
 
     return report
 

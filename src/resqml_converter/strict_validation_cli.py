@@ -61,6 +61,14 @@ Examples:
         "--skip-cross-object", action="store_true",
         help="Skip cross-object consistency checks",
     )
+    parser.add_argument(
+        "--skip-fesapi", action="store_true",
+        help="Skip fesapi compatibility checks (xsi:type, element ordering)",
+    )
+    parser.add_argument(
+        "--skip-rddms", action="store_true",
+        help="Skip RDDMS compatibility checks (namespace, .rels integrity)",
+    )
 
     args = parser.parse_args()
 
@@ -80,6 +88,8 @@ Examples:
             skip_epc_structure=args.skip_epc_structure,
             skip_hdf5=args.skip_hdf5,
             skip_cross_object=args.skip_cross_object,
+            skip_fesapi=args.skip_fesapi,
+            skip_rddms=args.skip_rddms,
         )
 
         if args.errors_only:

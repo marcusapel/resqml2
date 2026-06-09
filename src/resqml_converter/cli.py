@@ -125,6 +125,14 @@ def _add_validate_args(parser):
         help="Skip HDF5 reference validation",
     )
     parser.add_argument(
+        "--skip-fesapi", action="store_true",
+        help="Skip fesapi compatibility checks (xsi:type, element ordering)",
+    )
+    parser.add_argument(
+        "--skip-rddms", action="store_true",
+        help="Skip RDDMS compatibility checks (namespace, .rels integrity)",
+    )
+    parser.add_argument(
         "--strict", action="store_true", default=True,
         help="Enable all strict checks (default)",
     )
@@ -159,6 +167,8 @@ def _run_validate(args):
             skip_dor=args.skip_dor,
             skip_epc_structure=args.skip_epc_structure,
             skip_hdf5=args.skip_hdf5,
+            skip_fesapi=args.skip_fesapi,
+            skip_rddms=args.skip_rddms,
         )
 
         if args.json:
