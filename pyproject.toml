@@ -34,6 +34,7 @@ dev = [
 [project.scripts]
 resqml-convert = "resqml_converter.cli:main"
 resqml-validate = "resqml_converter.strict_validation_cli:main"
+osdu-schema-validate = "resqml_converter.osdu_schema_validation_cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
