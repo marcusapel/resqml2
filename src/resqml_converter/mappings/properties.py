@@ -87,9 +87,9 @@ def convert_discrete_prop_to_22(obj: Any, ctx: ConversionContext) -> Any:
     values_for_patch = []
     for pov in getattr(obj, 'patch_of_values', []) or []:
         vals = getattr(pov, 'values', None)
-        ext_arr = convert_int_hdf5_array_to_ext(vals)
-        if ext_arr:
-            values_for_patch.append(ext_arr)
+        arr_22 = _convert_int_values_201_to_22(vals)
+        if arr_22:
+            values_for_patch.append(arr_22)
 
     prop_kind_dor = _convert_property_kind_201_to_22_dor(obj, ctx)
 
@@ -289,25 +289,72 @@ def convert_property_kind_to_201(obj: eml23.PropertyKind, ctx: ConversionContext
 
 def _convert_property_kind_201_to_22_dor(obj: Any, ctx: ConversionContext) -> Optional[eml23.DataObjectReference]:
     """Convert 2.0.1 property_kind (LocalPropertyKind or StandardPropertyKind) to a DOR."""
+    import uuid as _uuid
+    _PK_NS = _uuid.UUID("a48c9c25-1e3a-43c8-be6a-044224cc69cb")
+
     pk = getattr(obj, 'property_kind', None)
     if pk is None:
         return None
 
     # LocalPropertyKind has a local_property_kind DOR
     if hasattr(pk, 'local_property_kind'):
-        return convert_dor_201_to_23(pk.local_property_kind, ctx)
+        dor = convert_dor_201_to_23(pk.local_property_kind, ctx)
+        if dor:
+            dor.qualified_type = "eml23.PropertyKind"
+        return dor
 
     # StandardPropertyKind has a kind enum
     if hasattr(pk, 'kind'):
-        # Create a synthetic DOR pointing to a well-known property kind
+        # Create a deterministic DOR pointing to a well-known property kind
         kind_name = str(pk.kind.value) if hasattr(pk.kind, 'value') else str(pk.kind)
+        pk_uuid = str(_uuid.uuid5(_PK_NS, kind_name))
+
+        # Emit the PropertyKind object if not already registered
+        if not ctx.get_converted(pk_uuid):
+            quantity_class = _kind_name_to_quantity_class(kind_name)
+            pk_obj = eml23.PropertyKind(
+                citation=eml23.Citation(
+                    title=kind_name,
+                    originator="Energistics RESQML Standard",
+                    creation="2014-01-01T00:00:00Z",
+                    format="EML v2.3",
+                ),
+                uuid=pk_uuid,
+                schema_version=SCHEMA_VERSION_EML23,
+                is_abstract=False,
+                quantity_class=quantity_class,
+            )
+            ctx.register(pk_uuid, pk_obj)
+
         return eml23.DataObjectReference(
-            uuid="00000000-0000-0000-0000-000000000000",
+            uuid=pk_uuid,
             title=kind_name,
-            qualified_type="eml22.PropertyKind",
+            qualified_type="eml23.PropertyKind",
         )
 
     return None
+
+
+def _kind_name_to_quantity_class(kind_name: str) -> str:
+    """Map standard property kind names to EML quantity classes."""
+    _MAP = {
+        "porosity": "volume per volume",
+        "permeability rock": "permeability rock",
+        "rock permeability": "permeability rock",
+        "saturation": "volume per volume",
+        "velocity": "length per time",
+        "net to gross ratio": "volume per volume",
+        "depth": "length",
+        "thickness": "length",
+        "pressure": "pressure",
+        "temperature": "thermodynamic temperature",
+        "density": "mass per volume",
+        "gamma ray API unit": "activity of radioactivity per volume",
+        "property multiplier": "dimensionless",
+        "transmissibility": "volume per time per pressure",
+        "continuous": "dimensionless",
+    }
+    return _MAP.get(kind_name.lower(), "dimensionless")
 
 
 def _convert_property_kind_22_to_201_ref(obj: Any, ctx: ConversionContext) -> Any:
@@ -363,6 +410,27 @@ def _get_hdf_proxy_ref_for_props(ctx: ConversionContext) -> Optional[eml20.DataO
                 uuid=get_obj_uuid(obj),
             )
     return None
+
+
+def _convert_int_values_201_to_22(vals: Any) -> Optional[Any]:
+    """Convert integer property values from 2.0.1 to 2.2.
+
+    Handles IntegerHdf5Array → IntegerExternalArray, and
+    IntegerConstantArray → eml23.IntegerConstantArray.
+    """
+    if vals is None:
+        return None
+    cls_name = type(vals).__name__
+    if "Hdf5" in cls_name:
+        return convert_int_hdf5_array_to_ext(vals)
+    if "ConstantArray" in cls_name:
+        return eml23.IntegerConstantArray(
+            value=getattr(vals, 'value', 0),
+            count=getattr(vals, 'count', 1),
+        )
+    # Fallback: try HDF5 path
+    ext = convert_int_hdf5_array_to_ext(vals)
+    return ext
 
 
 def _uom_to_quantity_class(uom: str) -> str:

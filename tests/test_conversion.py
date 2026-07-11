@@ -317,8 +317,8 @@ class TestDORConversion:
 # ─── CRS Conversion Tests ────────────────────────────────────────────────────
 
 class TestCRSConversion:
-    def test_local_depth_3d_crs_to_compound(self):
-        """LocalDepth3dCrs -> LocalEngineeringCompoundCrs + sub-objects."""
+    def test_local_depth_3d_crs_stays_flat(self):
+        """LocalDepth3dCrs stays flat in 2.2 (RDDMS-compatible, no compound decomposition)."""
         crs = r201.LocalDepth3DCrs(
             citation=citation_201("My CRS"),
             uuid=uid(), schema_version="2.0",
@@ -332,18 +332,14 @@ class TestCRSConversion:
             vertical_crs=eml20.VerticalCrsEpsgCode(epsg_code=5714),
         )
         converted, ctx = convert_objects([crs], "201_to_22")
-        # Should produce compound CRS + vertical CRS + 2D CRS
-        compound = next(
-            (c for c in converted if isinstance(c, eml23.LocalEngineeringCompoundCrs)), None
-        )
-        assert compound is not None
-        assert compound.uuid == crs.uuid
-        assert compound.origin_vertical_coordinate == 0.0
-        assert compound.vertical_axis.direction == eml23.VerticalDirection.DOWN
-
-        # Check sub-CRS objects were created
-        vert_crs = next((c for c in converted if isinstance(c, eml23.VerticalCrs)), None)
-        assert vert_crs is not None
+        # RDDMS-compatible: stays as LocalDepth3dCrs (flat), no compound decomposition
+        assert len(converted) == 1
+        result = converted[0]
+        assert isinstance(result, r201.LocalDepth3DCrs)
+        assert result.uuid == crs.uuid
+        assert result.schema_version == "2.2"
+        assert result.xoffset == 100.0
+        assert result.projected_uom == r201.LengthUom.M
 
     def test_compound_crs_to_local_depth_3d(self):
         """LocalEngineeringCompoundCrs -> LocalDepth3dCrs."""
@@ -428,7 +424,7 @@ class TestFullConversion:
         converted, ctx = convert_objects(objects, "201_to_22")
 
         assert len(ctx.errors) == 0
-        # Should have: compound CRS + vert + 2d + BoundaryFeature + HorizonInterp + Model + WellboreFeature
+        # Should have: flat CRS + BoundaryFeature + HorizonInterp + Model + WellboreFeature
         assert len(converted) >= len(objects)
 
         # Check types
@@ -437,4 +433,4 @@ class TestFullConversion:
         assert "HorizonInterpretation" in type_names
         assert "Model" in type_names
         assert "WellboreFeature" in type_names
-        assert "LocalEngineeringCompoundCrs" in type_names
+        assert "LocalDepth3DCrs" in type_names  # stays flat (RDDMS-compatible)

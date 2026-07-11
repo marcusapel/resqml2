@@ -699,6 +699,289 @@ def validate_fesapi_compat(
     return errors
 
 
+# --- RESQML 2.0.1 property-kind catalogue (abstract flags + hierarchy) ---
+
+_PROP_KIND_CACHE: Dict[str, Tuple[Set[str], Dict[str, str]]] = {}
+_PROP_OBJ_TYPES = ("ContinuousProperty", "CategoricalProperty", "DiscreteProperty")
+_XSI = "{http://www.w3.org/2001/XMLSchema-instance}type"
+
+
+def _load_property_kinds(version: str) -> Tuple[Set[str], Dict[str, str]]:
+    """Load the standard property-kind catalogue (name -> abstract flag, parent).
+
+    Parsed from the Energistics ancillary enum (enumValuesResqml.xml) shipped
+    alongside the XSD schemas.  Returns (abstract_names, parent_by_name).
+    """
+    if version in _PROP_KIND_CACHE:
+        return _PROP_KIND_CACHE[version]
+    abstract: Set[str] = set()
+    parent: Dict[str, str] = {}
+    enum = (_SCHEMAS_DIR / version / "resqmlv2" / f"v{version}"
+            / "ancillary" / "enumValuesResqml.xml")
+    try:
+        txt = enum.read_text(encoding="utf-8")
+        for m in re.finditer(
+            r"<value>\s*<name>([^<]+)</name>"
+            r"(?:\s*<description>.*?</description>)?\s*"
+            r"<isAbstract>(\w+)</isAbstract>"
+            r"(?:\s*<parentKind>([^<]+)</parentKind>)?",
+            txt, re.S,
+        ):
+            nm = m.group(1).strip()
+            parent[nm] = (m.group(3) or "").strip()
+            if m.group(2).strip().lower() == "true":
+                abstract.add(nm)
+    except (FileNotFoundError, OSError):
+        pass
+    _PROP_KIND_CACHE[version] = (abstract, parent)
+    return abstract, parent
+
+
+def _kind_branch(name: str, parent: Dict[str, str]) -> Optional[str]:
+    """Return 'continuous' or 'discrete' depending on the kind's ancestry."""
+    seen: Set[str] = set()
+    chain = {name}
+    cur = name
+    while cur in parent and cur not in seen:
+        seen.add(cur)
+        p = parent.get(cur)
+        if not p:
+            break
+        chain.add(p)
+        cur = p
+    if "discrete" in chain or "categorical" in chain:
+        return "discrete"
+    if "continuous" in chain:
+        return "continuous"
+    return None
+
+
+def validate_property_kinds(
+    epc_path: str,
+    version: Optional[str] = None,
+) -> List[StrictValidationError]:
+    """Validate property -> property-kind usage for RESQML 2.0.1 / fesapi.
+
+    fesapi (and the RESQML 2.0.1 spec) require that:
+      - a property does NOT reference an *abstract* standard property kind
+        (e.g. 'volume per volume', 'dimensionless'); abstract-kind properties
+        are treated as partial.  Derive a non-abstract local kind (optionally
+        copying a non-abstract PWLS kind) instead.
+      - a DiscreteProperty / CategoricalProperty uses a kind rooted in
+        'discrete' (not 'continuous'); a ContinuousProperty uses a kind rooted
+        in 'continuous'.  (This is why a discrete property of kind 'length' is
+        rejected: 'length' derives from 'continuous'.)
+      - a local property kind referenced by a property is non-abstract.
+    """
+    errors: List[StrictValidationError] = []
+    if version and version != "2.0.1":
+        return errors
+    abstract, parent = _load_property_kinds(version or "2.0.1")
+    if not abstract:
+        return errors  # catalogue unavailable; nothing to check against
+
+    try:
+        zf = zipfile.ZipFile(epc_path, "r")
+    except (zipfile.BadZipFile, FileNotFoundError):
+        return errors
+
+    with zf:
+        names = zf.namelist()
+
+        # Catalogue local PropertyKind objects: uuid -> (is_abstract, parent_std)
+        local_kinds: Dict[str, Tuple[bool, Optional[str]]] = {}
+        for name in names:
+            base = name.rsplit("/", 1)[-1]
+            if not base.startswith("obj_PropertyKind") or not name.endswith(".xml"):
+                continue
+            if "_rels/" in name:
+                continue
+            try:
+                root = etree.fromstring(zf.read(name))
+            except etree.XMLSyntaxError:
+                continue
+            u = root.get("uuid")
+            is_abs = False
+            pstd: Optional[str] = None
+            for el in root.iter():
+                ln = etree.QName(el.tag).localname
+                if ln == "IsAbstract":
+                    is_abs = (el.text or "").strip().lower() == "true"
+                elif ln == "ParentPropertyKind":
+                    for c in el.iter():
+                        if etree.QName(c.tag).localname == "Kind":
+                            pstd = (c.text or "").strip()
+            if u:
+                local_kinds[u] = (is_abs, pstd)
+
+        for name in names:
+            base = name.rsplit("/", 1)[-1]
+            if not name.endswith(".xml") or "_rels/" in name:
+                continue
+            if not any(base.startswith("obj_" + t) for t in _PROP_OBJ_TYPES):
+                continue
+            try:
+                root = etree.fromstring(zf.read(name))
+            except etree.XMLSyntaxError:
+                continue
+            ptype = etree.QName(root.tag).localname.removeprefix("obj_")
+            obj_uuid = root.get("uuid")
+            expected = "continuous" if ptype == "ContinuousProperty" else "discrete"
+
+            pk = next((c for c in root
+                       if etree.QName(c.tag).localname == "PropertyKind"), None)
+            if pk is None:
+                continue
+            xtype = pk.get(_XSI) or ""
+
+            if xtype.endswith("StandardPropertyKind"):
+                kind_name = next((( c.text or "").strip() for c in pk
+                                  if etree.QName(c.tag).localname == "Kind"), None)
+                if not kind_name:
+                    continue
+                if kind_name in abstract:
+                    errors.append(StrictValidationError(
+                        message=(
+                            f"Property references the ABSTRACT standard property "
+                            f"kind '{kind_name}'. fesapi treats abstract-kind "
+                            f"properties as partial; derive a non-abstract local "
+                            f"property kind (or copy a non-abstract PWLS kind)."),
+                        severity=Severity.ERROR,
+                        category=ValidationCategory.FESAPI_COMPAT,
+                        object_uuid=obj_uuid, object_type=ptype,
+                    ))
+                else:
+                    br = _kind_branch(kind_name, parent)
+                    if br and br != expected:
+                        errors.append(StrictValidationError(
+                            message=(
+                                f"{ptype} uses standard property kind "
+                                f"'{kind_name}' which derives from '{br}', not "
+                                f"'{expected}'. A {ptype} must use a kind rooted "
+                                f"in '{expected}'."),
+                            severity=Severity.ERROR,
+                            category=ValidationCategory.FESAPI_COMPAT,
+                            object_uuid=obj_uuid, object_type=ptype,
+                        ))
+            elif xtype.endswith("LocalPropertyKind"):
+                ref_uuid = next(((c.text or "").strip() for c in pk.iter()
+                                 if etree.QName(c.tag).localname == "UUID"), None)
+                if not ref_uuid or ref_uuid not in local_kinds:
+                    continue  # DOR integrity handles a missing local kind
+                is_abs, pstd = local_kinds[ref_uuid]
+                if is_abs:
+                    errors.append(StrictValidationError(
+                        message=(
+                            f"Property references local property kind "
+                            f"{ref_uuid} which is IsAbstract=true; a kind used by "
+                            f"a property must be non-abstract."),
+                        severity=Severity.ERROR,
+                        category=ValidationCategory.FESAPI_COMPAT,
+                        object_uuid=obj_uuid, object_type=ptype,
+                    ))
+                if pstd:
+                    br = _kind_branch(pstd, parent)
+                    if br and br != expected:
+                        errors.append(StrictValidationError(
+                            message=(
+                                f"{ptype} uses local kind {ref_uuid} whose parent "
+                                f"'{pstd}' derives from '{br}', not '{expected}'."),
+                            severity=Severity.ERROR,
+                            category=ValidationCategory.FESAPI_COMPAT,
+                            object_uuid=obj_uuid, object_type=ptype,
+                        ))
+
+    return errors
+
+
+def validate_fesapi_packaging(
+    epc_path: str,
+    version: Optional[str] = None,
+    h5_path: Optional[str] = None,
+) -> List[StrictValidationError]:
+    """Validate package-level fesapi conventions for RESQML 2.0.1.
+
+      - [Content_Types].xml should not carry a catch-all <Default
+        Extension="xml"> (fesapi ignores it; every object is an explicit
+        Override).
+      - <eml:VersionString> should be avoided (fesapi guidance: do not use
+        object versioning unless you really need it).
+      - the HDF5 file root group should carry a 'uuid' attribute equal to the
+        owning EpcExternalPartReference uuid so fesapi/ETP can bind them.
+    """
+    errors: List[StrictValidationError] = []
+    if version and version != "2.0.1":
+        return errors
+    try:
+        zf = zipfile.ZipFile(epc_path, "r")
+    except (zipfile.BadZipFile, FileNotFoundError):
+        return errors
+
+    with zf:
+        names = zf.namelist()
+
+        if "[Content_Types].xml" in names:
+            ct = zf.read("[Content_Types].xml").decode("utf-8", "replace")
+            if re.search(r'<Default\s+Extension="xml"', ct):
+                errors.append(StrictValidationError(
+                    message=(
+                        '[Content_Types].xml declares a catch-all '
+                        '<Default Extension="xml">. fesapi ignores it and every '
+                        'object part is already an explicit Override; remove it '
+                        '(keep the .rels Default).'),
+                    severity=Severity.WARNING,
+                    category=ValidationCategory.FESAPI_COMPAT,
+                ))
+
+        vcount = 0
+        for name in names:
+            if not name.endswith(".xml") or name == "[Content_Types].xml" \
+                    or "_rels/" in name:
+                continue
+            if b"VersionString" in zf.read(name):
+                vcount += 1
+        if vcount:
+            errors.append(StrictValidationError(
+                message=(
+                    f"{vcount} object(s) declare an <eml:VersionString>. fesapi "
+                    f"guidance: do not use object versioning unless required \u2014 "
+                    f"mismatched DOR/object versions are a common cause of broken "
+                    f"references."),
+                severity=Severity.WARNING,
+                category=ValidationCategory.FESAPI_COMPAT,
+            ))
+
+    # HDF5 root 'uuid' attribute
+    if h5_path is None:
+        epc_dir = os.path.dirname(epc_path)
+        stem = Path(epc_path).stem
+        for ext in (".h5", ".hdf5", ".hdf"):
+            cand = os.path.join(epc_dir, stem + ext)
+            if os.path.exists(cand):
+                h5_path = cand
+                break
+    if h5_path and os.path.exists(h5_path):
+        try:
+            import h5py
+            with h5py.File(h5_path, "r") as f:
+                if "uuid" not in f.attrs:
+                    errors.append(StrictValidationError(
+                        message=(
+                            f"HDF5 file '{os.path.basename(h5_path)}' root group "
+                            f"has no 'uuid' attribute. fesapi/ETP expect the owning "
+                            f"EpcExternalPartReference uuid as a root attribute to "
+                            f"bind the HDF5 to the EPC."),
+                        severity=Severity.WARNING,
+                        category=ValidationCategory.FESAPI_COMPAT,
+                    ))
+        except ImportError:
+            pass
+        except Exception:
+            pass
+
+    return errors
+
+
 # --- RDDMS Compatibility Validation ---
 
 _RELS_NS = "http://schemas.openxmlformats.org/package/2006/relationships"
@@ -1040,6 +1323,8 @@ def validate_epc_strict(
     # 7. fesapi compatibility (raw XML checks)
     if not skip_fesapi:
         report.errors.extend(validate_fesapi_compat(epc_path, version))
+        report.errors.extend(validate_property_kinds(epc_path, version))
+        report.errors.extend(validate_fesapi_packaging(epc_path, version, h5_path))
 
     # 8. RDDMS compatibility (rels, namespace, ContentType)
     if not skip_rddms:

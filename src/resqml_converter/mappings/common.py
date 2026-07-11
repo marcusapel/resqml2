@@ -331,9 +331,10 @@ _TYPE_NAME_MAP_22_TO_201 = {
 def _content_type_to_qualified_type_22(content_type: Optional[str]) -> Optional[str]:
     """Convert 2.0.1 content_type to 2.2 qualified_type string.
 
-    RDDMS convention:
-    - RESQML types → resqml22.X (e.g. resqml22.LocalDepth3dCrs)
-    - EML types → eml22.X (e.g. eml22.PropertyKind)  NOT eml23!
+    Strict convention (XSD-compliant):
+    - RESQML types → resqml22.X (e.g. resqml22.IjkGridRepresentation)
+    - EML types → eml23.X (e.g. eml23.PropertyKind)
+    - CRS types → eml23.LocalEngineeringCompoundCrs (they get decomposed)
     """
     if content_type is None:
         return None
@@ -347,13 +348,16 @@ def _content_type_to_qualified_type_22(content_type: Optional[str]) -> Optional[
     # Map type name
     mapped_name = _TYPE_NAME_MAP_201_TO_22.get(type_name, type_name)
 
-    # Determine domain — RDDMS uses eml22 (not eml23) for EML types
-    if "resqml" in content_type:
-        return f"resqml22.{mapped_name}"
-    elif "eml" in content_type:
-        return f"eml22.{mapped_name}"
-    else:
-        return f"resqml22.{mapped_name}"
+    # CRS types decompose into EML 2.3 compound CRS
+    if mapped_name in ("LocalDepth3dCrs", "LocalTime3dCrs"):
+        return "eml23.LocalEngineeringCompoundCrs"
+
+    # EML types (PropertyKind, EpcExternalPartReference, etc.) use eml23
+    if "eml" in content_type or mapped_name in ("PropertyKind", "EpcExternalPartReference"):
+        return f"eml23.{mapped_name}"
+
+    # RESQML types
+    return f"resqml22.{mapped_name}"
 
 
 def _qualified_type_to_content_type_201(qualified_type: Optional[str]) -> Optional[str]:

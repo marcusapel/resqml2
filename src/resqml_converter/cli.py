@@ -67,7 +67,6 @@ Examples:
 
 
 def _add_convert_args(parser):
-def _add_convert_args(parser):
     parser.add_argument(
         "--input", "-i", required=True, help="Input EPC file path"
     )
