@@ -1136,6 +1136,9 @@ def validate_rddms_compat(
                     ))
 
             # Check xsi:type on root element (required for RDDMS ETP server-side parsing)
+            # Skip OPC package metadata files (not RESQML objects)
+            if name.startswith('docProps/') or name.startswith('_rels/') or '[Content_Types]' in name:
+                continue
             # Find the root opening tag (skip XML prolog, then everything up to first >)
             root_start = xml_content.find('<', xml_content.find('?>') + 2) if '?>' in xml_content else 0
             root_tag_end = xml_content.find('>', root_start) if root_start >= 0 else -1

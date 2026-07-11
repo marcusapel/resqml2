@@ -292,7 +292,7 @@ def convert_ijk_grid_to_22(obj: r201.IjkGridRepresentation, ctx: ConversionConte
     if obj.geometry:
         g = obj.geometry
         points = _convert_points_201_to_22(g.points, ctx) if hasattr(g, 'points') else None
-        pillar_defined = convert_bool_constant_201_to_23(
+        pillar_defined = _convert_bool_array_201_to_22(
             g.pillar_geometry_is_defined
         ) if hasattr(g, 'pillar_geometry_is_defined') else None
 
@@ -332,7 +332,7 @@ def convert_unstruct_grid_to_22(obj: Any, ctx: ConversionContext) -> Any:
             face_count=getattr(src_geom, 'face_count', 0),
             faces_per_cell=_convert_jagged_array_201_to_22(getattr(src_geom, 'faces_per_cell', None)),
             nodes_per_face=_convert_jagged_array_201_to_22(getattr(src_geom, 'nodes_per_face', None)),
-            cell_face_is_right_handed=convert_bool_constant_201_to_23(
+            cell_face_is_right_handed=_convert_bool_array_201_to_22(
                 getattr(src_geom, 'cell_face_is_right_handed', None)
             ),
         )
@@ -394,6 +394,39 @@ def convert_wellbore_frame_to_22(obj: Any, ctx: ConversionContext) -> Any:
 
 @registry.register_201_to_22(r"BlockedWellboreRepresentation")
 def convert_blocked_wellbore_to_22(obj: Any, ctx: ConversionContext) -> Any:
+    # Convert IntervalGridCells if present
+    igc = getattr(obj, 'interval_grid_cells', None)
+    interval_grid_cells = None
+    if igc:
+        interval_grid_cells = r22.IntervalGridCells(
+            cell_count=getattr(igc, 'cell_count', 0),
+            grid_indices=_convert_int_array_201_to_22(getattr(igc, 'grid_indices', None)),
+            cell_indices=_convert_int_array_201_to_22(getattr(igc, 'cell_indices', None)),
+            local_face_pair_per_cell_indices=_convert_int_array_201_to_22(
+                getattr(igc, 'local_face_pair_per_cell_indices', None)),
+            grid=[convert_dor_201_to_23(g, ctx) for g in (getattr(igc, 'grid', None) or [])],
+        )
+    else:
+        # BlockedWellbore requires IntervalGridCells in 2.2 - create minimal stub
+        # Use the grid reference from the source object's Grid list
+        grid_uuid = "00000000-0000-0000-0000-000000000000"
+        grid_title = "Grid"
+        if hasattr(obj, 'grid') and obj.grid:
+            src_grid = obj.grid[0]
+            grid_uuid = src_grid.uuid or grid_uuid
+            grid_title = src_grid.title or grid_title
+        grid_dor = eml23.DataObjectReference(
+            qualified_type="resqml22.IjkGridRepresentation",
+            title=grid_title,
+            uuid=grid_uuid,
+        )
+        interval_grid_cells = r22.IntervalGridCells(
+            cell_count=1,
+            grid_indices=eml23.IntegerConstantArray(value=0, count=1),
+            cell_indices=eml23.IntegerConstantArray(value=0, count=1),
+            local_face_pair_per_cell_indices=eml23.IntegerConstantArray(value=0, count=1),
+            grid=[grid_dor],
+        )
     return r22.BlockedWellboreRepresentation(
         citation=convert_citation_201_to_23(obj.citation),
         uuid=get_obj_uuid(obj),
@@ -402,6 +435,7 @@ def convert_blocked_wellbore_to_22(obj: Any, ctx: ConversionContext) -> Any:
         trajectory=convert_dor_201_to_23(getattr(obj, 'trajectory', None), ctx),
         node_count=getattr(obj, 'node_count', 0),
         node_md=convert_float_hdf5_array_to_ext(getattr(obj, 'node_md', None)),
+        interval_grid_cells=interval_grid_cells,
     )
 
 
